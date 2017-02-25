@@ -68,7 +68,7 @@ class MyException(Exception):
 
 def login(args, cookie, isChange = 0):
     while 1:
-        handler=urllib2.HTTPCookieProcessor(cookie)
+        handler = urllib2.HTTPCookieProcessor(cookie)
         opener = urllib2.build_opener(handler)
         #此处的open方法同urllib2的urlopen方法，也可以传入request
         loginUrl='https://iaaa.pku.edu.cn/iaaa/oauthlogin.do'
@@ -123,6 +123,8 @@ def load_supplycancel(cookie, init = 0):
             pre_suc=1
         except urllib2.URLError, e:
             pass
+        except socket.timeout, e:
+            pass
     response=response.read()
     page_opener=urllib2.build_opener(urllib2.HTTPCookieProcessor(cookie))
     if init is 1:
@@ -159,6 +161,8 @@ def load_supplycancel(cookie, init = 0):
                     page_suc=1
                 except urllib2.URLError, e:
                     pass
+                except socket.timeout, e:
+                    pass
             response=response.read()
             soup = bs(response.strip(),"html.parser")
             #print(soup.prettify())
@@ -167,6 +171,7 @@ def load_supplycancel(cookie, init = 0):
                 #print list
 #北大壁球馆这种情况
                 for item in list:
+                    print item
                     if item.find_parent("td").find_previous_siblings() != []:
                         list.remove(item)
 #已选上的情况
@@ -174,7 +179,7 @@ def load_supplycancel(cookie, init = 0):
                 for item in list:
                     if item.find_previous(string = re.compile(u"\"已选上列表\"中列出的")) is not None:
                         is_elected = 1
-                        course_list.delete(course)
+                        course_list.pop(course["name"])
                         break
                     else:
                         
@@ -218,6 +223,8 @@ def get_num(cookie,refresh_url):
             refresh_suc=1
         except urllib2.URLError, e:
             pass
+        except socket.timeout, e:
+            pass
     response = response.read().strip()
     return response
 
@@ -238,6 +245,7 @@ def refresh(cookie):
             for postfix in course["postfixs"]:
                 cnt = cnt + 1
                 response = get_num(cookie,"http://elective.pku.edu.cn/elective2008/edu/pku/stu/elective/controller/supplement/refreshLimit.do"+postfix)
+                #print postfix
                 handler = ContentHandler()
                 #print response
                 try:
@@ -250,12 +258,15 @@ def refresh(cookie):
                     print(get_time()+course["name"]+u" 获取名额失败")
                 if now == course['limits'][cnt]:
                     print(get_time()+course["name"]+" "+str(course["limits"][cnt])+"/"+str(now))
-                if now < course['limits'][cnt] and now != -1:
-                    print(get_time()+course["name"]+u" 发现名额")
-                    elect(cookie,postfix,course['name'])
-                    load_supplycancel(cookie,init=1)
-                    start_over = 1
-                    break
+                if now < course['limits'][cnt]:
+                    if now < 0:
+                        continue
+                    else:
+                        print(get_time()+course["name"]+u" 发现名额"+" "+str(course["limits"][cnt])+"/"+str(now))
+                        elect(cookie,postfix,course['name'])
+                        load_supplycancel(cookie,init=1)
+                        start_over = 1
+                        break
                 time.sleep(args.delay)
             if start_over is 1:
                 break;
@@ -264,9 +275,18 @@ def refresh(cookie):
 def check_elected(response,name):
     soup = bs(response,"html.parser")
     head = soup.find(string = re.compile(u"\"已选上列表\"中列出的"))
-    if head.find_next(string = re.compile(name)) != None:
-        print(get_time()+u"已选上 "+name)
-    else:
+    try:
+        if head.find_next(string = re.compile(name)) != None:
+            print(get_time()+u"已选上 "+name)
+        else:
+            f = open('error.log','wb')
+            f.write(response)
+            f.close()
+            print(get_time()+u"未选上 "+name)
+    except Exception, e:
+        f = open('error.log','wb')
+        f.write(response)
+        f.close()
         print(get_time()+u"未选上 "+name)
 
 def elect(cookie,postfix,name):
