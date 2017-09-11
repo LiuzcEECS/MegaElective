@@ -45,6 +45,18 @@ refresh_headers = {
         'Accept-Encoding': 'gzip, deflate, sdch',
         'Accept-Language': 'zh-CN,zh;q=0.8'
     }
+limit_headers = {
+        'Host': 'elective.pku.edu.cn',
+        'Connection': 'keep-alive',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 6.3; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/45.0.2454.101 Safari/537.36',
+        'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8',
+        'Origin': 'http://elective.pku.edu.cn',
+        'Accept': '*/*',
+        'Referer': pre_url,
+        'Accept-Encoding': 'gzip, deflate, sdch',
+        'Accept-Language': 'zh-CN,zh;q=0.8',
+        'X-Requested-With':'XMLHttpRequest'
+    }
 refresh_postdata=urllib.urlencode({
 
     })
@@ -118,7 +130,7 @@ def load_supplycancel(cookie, init = 0):
     pre_suc=0
     while pre_suc is 0:
         try:
-            request=urllib2.Request(pre_url,refresh_postdata,refresh_headers)
+            request=urllib2.Request(pre_url,refresh_postdata,limit_headers)
             response = refresh_opener.open(request, timeout = 4)
             pre_suc=1
         except urllib2.URLError, e:
@@ -144,6 +156,7 @@ def load_supplycancel(cookie, init = 0):
             course_list[name]["name"] = name
             course_list[name]["class_list"] = class_list
             course_list[name]["postfixs"] = []
+            course_list[name]["eids"] = []
             course_list[name]["limits"] = []
 
 
@@ -187,17 +200,22 @@ def load_supplycancel(cookie, init = 0):
                         if str(class_num) not in course["class_list"]:
                             continue
                         postfix = item.find_parent("td").find_next_siblings()[-1].a["onclick"]
+                        #print postfix
                         postfix = postfix.split(",")
-                        if "confirm" in postfix[0]:
-                            index = postfix[-2].strip("\'")
-                            seq = postfix[-1].strip("\');")
+                        #if "confirm" in postfix[0]:
+                        index = postfix[-4].strip("\'")
+                        seq = postfix[-3].strip("\'")
 
-                        else:
-                            index = postfix[-3].strip("\'")
-                            seq = postfix[-2].strip("\'")
+                        #else:
+                        #    index = postfix[-3].strip("\'")
+                        #    seq = postfix[-2].strip("\'")
                         postfix = "?index="+index+"&seq="+seq
                         #print postfix
+
+                        eid = item.find_parent("td").find_next_siblings()[-1].a["href"]
+                        eid = eid.split("&")[-2]
                         course["postfixs"].append(postfix)
+                        course["eids"].append(eid)
                         limit = item.find_parent("td").find_next_siblings()[-2].span.string
                         limit = int(limit.split("/")[0])
                         course["limits"].append(limit)
@@ -235,35 +253,40 @@ def refresh(cookie):
     opener = urllib2.build_opener(handler)
     '''cookie_str='FromNewLogin=yes;JSESSIONID='+jsession;'''
     load_supplycancel(cookie, init = 0)
+    flag = 1
 
     while course_list != {}:
         start_over = 0
         for key, course in course_list.items():
             now = -2
-            print(get_time()+u"检查课程： "+course["name"])
-            cnt = -1
-            for postfix in course["postfixs"]:
-                cnt = cnt + 1
+            #print(get_time()+u"检查课程： "+course["name"])
+            for cnt, postfix in enumerate(course["postfixs"]):
                 response = get_num(cookie,"http://elective.pku.edu.cn/elective2008/edu/pku/stu/elective/controller/supplement/refreshLimit.do"+postfix)
                 #print postfix
                 handler = ContentHandler()
                 #print response
                 try:
-                    root=ET.fromstring(response)
-                    if root[0].text is not None:
-                        now=int(root[0].text)
+                    flag = 1
+                    now = int(json.loads(response)["electedNum"])
+                    #root=ET.fromstring(response)
+                    #if root[0].text is not None:
+                    #    now=int(root[0].text)
                 except Exception, e:
-                    pass
-                if int(now) == -1:
+                    if flag == 1:
+                        print("Response Error")
+                    flag = 0;
+                #print now
+                if int(now) < 0:
                     print(get_time()+course["name"]+u" 获取名额失败")
                 if now == course['limits'][cnt]:
                     print(get_time()+course["name"]+" "+str(course["limits"][cnt])+"/"+str(now))
                 if now < course['limits'][cnt]:
                     if now < 0:
+                        time.sleep(args.delay / 3.0)
                         continue
                     else:
                         print(get_time()+course["name"]+u" 发现名额"+" "+str(course["limits"][cnt])+"/"+str(now))
-                        elect(cookie,postfix,course['name'])
+                        elect(cookie,postfix,course['name'], course["eids"][cnt])
                         load_supplycancel(cookie,init=1)
                         start_over = 1
                         break
@@ -289,8 +312,11 @@ def check_elected(response,name):
         f.close()
         print(get_time()+u"未选上 "+name)
 
-def elect(cookie,postfix,name):
-    elect_url = "http://elective.pku.edu.cn/elective2008/edu/pku/stu/elective/controller/supplement/electSupplement.do"+postfix
+def elect(cookie,postfix,name,eid):
+    rn = random.random()
+    elect_url = "http://elective.pku.edu.cn/elective2008/edu/pku/stu/elective/controller/supplement/electSupplement.do"+postfix+"&"+eid+"&rn="+str(rn)
+    print eid
+    print elect_url
     print(get_time()+u"开始选择 "+name)
     load_supplycancel(cookie,init=0)
 
@@ -357,8 +383,8 @@ def valid(cookie):
     request=urllib2.Request(send_url,send_postdata,send_headers)
     response = send_opener.open(request)
     response = response.read()
-    #print response
-    return bs(response,"lxml").valid.string
+    #return bs(response,"lxml").valid.string
+    return str(json.loads(response)["valid"])
 
 
 def main(args_parser):
@@ -426,9 +452,8 @@ def parse_arguments(argv):
     parser.add_argument('--password', type = str)
     parser.add_argument('--pages', type = int)
     parser.add_argument('--config', type = str, default = "./config")
-    parser.add_argument('--delay', type = float, default = 3.5)
+    parser.add_argument('--delay', type = float, default = 3.0)
     return parser.parse_args(argv)
-
 
 if __name__ == '__main__':
     main(parse_arguments(sys.argv[1:]))
